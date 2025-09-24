@@ -1,8 +1,17 @@
+import os
 import sqlite3
 from newsdataapi import NewsDataApiClient
 
-# Replace with your actual API key
-API_KEY = "pub_ac6cd23aa0124ba197f63ad7a78f295d"
+# Read the API key from an environment variable
+API_KEY: str | None = os.environ.get("NEWS_API_KEY")
+
+if not API_KEY:
+    print("Error: NEWS_API_KEY environment variable not set.")
+    exit(1)
+
+# Type checker hint: API_KEY is now guaranteed to be str
+api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
+
 DB_NAME = "newsdata.db"
 
 
@@ -11,7 +20,6 @@ def fetch_and_store_articles():
     Fetches news articles from NewsData.io API and stores them in an SQLite database.
     """
     try:
-        api = NewsDataApiClient(apikey=API_KEY)
         response_data = api.news_api(language="en")
 
     except Exception as e:
