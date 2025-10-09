@@ -1,2 +1,19 @@
-gemini.py
 .env
+data
+gemini.py
+
+# Python-specific additions
+__pycache__/
+*.pyc
+.venv
+.pytest_cache/
+.tox/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Operating System and Editor Files
+.DS_Store
+Thumbs.db
+
+# Log and temporary files
+*.log
