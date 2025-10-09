@@ -1,1 +1,2 @@
 newsdataapi
+psycopg2-binary

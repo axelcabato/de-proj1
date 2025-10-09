@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import psycopg2
 from newsdataapi import NewsDataApiClient
 
 # Read the API key from an environment variable
@@ -11,8 +12,6 @@ if not API_KEY:
 
 # Type checker hint: API_KEY is now guaranteed to be str
 api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
-
-DB_NAME = "newsdata.db"
 
 
 def fetch_and_store_articles():
@@ -35,19 +34,21 @@ def fetch_and_store_articles():
         print(f"Successfully fetched {len(articles_to_store)} articles.")
 
         try:
-            with sqlite3.connect(DB_NAME) as conn:
-                cursor = conn.cursor()
-
-                cursor.execute("""
-                CREATE TABLE IF NOT EXISTS articles (
-                    id TEXT PRIMARY KEY,
-                    title TEXT,
-                    author TEXT,
-                    body TEXT,
-                    source TEXT,
-                    published_at TEXT
-                )
-                """)
+            POSTGRES_URL = os.environ.get("POSTGRES_URL")
+            if not POSTGRES_URL:
+                raise ValueError("POSTGRES_URL not set")
+            with psycopg2.connect(POSTGRES_URL) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS articles (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        author TEXT,
+                        body TEXT,
+                        source TEXT,
+                        published_at TEXT
+                    )
+                    """)
 
                 inserted_count = 0
                 for item in articles_to_store:
@@ -83,7 +84,7 @@ def fetch_and_store_articles():
                 for row in rows:
                     print(row)
 
-        except sqlite3.Error as e:
+        except psycopg2.Error as e:
             print(f"Database error occurred: {e}")
 
     else:
