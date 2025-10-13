@@ -1,6 +1,7 @@
 .env
 data
 gemini.py
+.vscode
 
 # Python-specific additions
 __pycache__/
