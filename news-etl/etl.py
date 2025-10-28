@@ -16,7 +16,7 @@ api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
 
 def fetch_and_store_articles():
     """
-    Fetches news articles from NewsData.io API and stores them in an SQLite database.
+    Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
     """
     try:
         response_data = api.news_api(language="en")
@@ -68,8 +68,14 @@ def fetch_and_store_articles():
                     }
 
                     cursor.execute("""
-                    INSERT OR REPLACE INTO articles (id, title, author, body, source, published_at)
-                    VALUES (:id, :title, :author, :body, :source, :published_at)
+                    INSERT INTO articles (id, title, author, body, source, published_at)
+                    VALUES (%(id)s, %(title)s, %(author)s, %(body)s, %(source)s, %(published_at)s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        author = EXCLUDED.author,
+                        body = EXCLUDED.body,
+                        source = EXCLUDED.source,
+                        published_at = EXCLUDED.published_at
                     """, article)
                     inserted_count += 1
 
