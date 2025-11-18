@@ -38,7 +38,7 @@ services:
         condition: service_healthy
     environment:
       # The CRITICAL CONNECTION STRING (See explanation below)
-      POSTGRES_URL: postgres://user:password@postgres:5432/news_db
+      POSTGRES_URL: postgresql://user:password@postgres:5432/news_db
       NEWS_API_KEY: ${NEWS_API_KEY} # Reads the API key from your .env file
     # Ensure the script runs only once and exits
     command: ["python", "etl.py"]

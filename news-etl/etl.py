@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import psycopg2
 from newsdataapi import NewsDataApiClient
 
@@ -16,7 +15,7 @@ api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
 
 def fetch_and_store_articles():
     """
-    Fetches news articles from NewsData.io API and stores them in an SQLite database.
+    Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
     """
     try:
         response_data = api.news_api(language="en")
@@ -37,8 +36,10 @@ def fetch_and_store_articles():
             POSTGRES_URL = os.environ.get("POSTGRES_URL")
             if not POSTGRES_URL:
                 raise ValueError("POSTGRES_URL not set")
+            
             with psycopg2.connect(POSTGRES_URL) as conn:
                 with conn.cursor() as cursor:
+                    # Create table if it doesn't exist
                     cursor.execute("""
                     CREATE TABLE IF NOT EXISTS articles (
                         id TEXT PRIMARY KEY,
@@ -50,39 +51,50 @@ def fetch_and_store_articles():
                     )
                     """)
 
-                inserted_count = 0
-                for item in articles_to_store:
-                    # SOLUTION: Check if the 'creator' is a list and join it into a string
-                    creator = item.get("creator")
-                    if isinstance(creator, list):
-                        # Join the list of creators into a single string
-                        creator = ", ".join(creator)
+                    # Insert/update all articles
+                    inserted_count = 0
+                    for item in articles_to_store:
+                        creator = item.get("creator")
+                        if isinstance(creator, list):
+                            creator = ", ".join(creator)
 
-                    article = {
-                        "id": item.get("article_id"),
-                        "title": item.get("title"),
-                        "author": creator,  # Use the corrected creator variable
-                        "body": item.get("content"),
-                        "source": item.get("source_name"),
-                        "published_at": item.get("pubDate"),
-                    }
+                        article = {
+                            "id": item.get("article_id"),
+                            "title": item.get("title"),
+                            "author": creator,
+                            "body": item.get("content"),
+                            "source": item.get("source_name"),
+                            "published_at": item.get("pubDate"),
+                        }
 
-                    cursor.execute("""
-                    INSERT OR REPLACE INTO articles (id, title, author, body, source, published_at)
-                    VALUES (:id, :title, :author, :body, :source, :published_at)
-                    """, article)
-                    inserted_count += 1
+                        cursor.execute("""
+                        INSERT INTO articles (id, title, author, body, source, published_at)
+                        VALUES (%(id)s, %(title)s, %(author)s, %(body)s, %(source)s, %(published_at)s)
+                        ON CONFLICT (id) DO UPDATE SET
+                            title = EXCLUDED.title,
+                            author = EXCLUDED.author,
+                            body = EXCLUDED.body,
+                            source = EXCLUDED.source,
+                            published_at = EXCLUDED.published_at
+                        """, article)
+                        inserted_count += 1
 
-                print(
-                    f"Successfully inserted/updated {inserted_count} articles into the database.")
+                    # Explicitly commit the transaction to persist all inserts
+                    conn.commit()
+                    print(f"Successfully inserted/updated {inserted_count} articles into the database.")
 
-                print("\n--- Verifying data by selecting records ---")
-                cursor.execute(
-                    "SELECT id, title, source FROM articles LIMIT 5")
-                rows = cursor.fetchall()
-
-                for row in rows:
-                    print(row)
+                # Verification happens in a separate cursor context after commit
+                # This way, if verification fails, we know the data was saved
+                try:
+                    with conn.cursor() as cursor:
+                        print("\n--- Verifying data by selecting records ---")
+                        cursor.execute("SELECT id, title, source FROM articles LIMIT 5")
+                        rows = cursor.fetchall()
+                        
+                        for row in rows:
+                            print(row)
+                except psycopg2.Error as verify_error:
+                    print(f"Data was saved successfully, but verification query failed: {verify_error}")
 
         except psycopg2.Error as e:
             print(f"Database error occurred: {e}")
