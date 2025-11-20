@@ -84,7 +84,7 @@ def fetch_and_store_articles():
                     print(f"Successfully inserted/updated {inserted_count} articles into the database.")
 
                 # Verification happens in a separate cursor context after commit
-                # This way, if verification fails, we know the data was saved
+                # If verification fails, we know the data was saved
                 try:
                     with conn.cursor() as cursor:
                         print("\n--- Verifying data by selecting records ---")

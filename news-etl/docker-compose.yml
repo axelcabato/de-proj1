@@ -9,27 +9,26 @@ services:
     container_name: de_postgres_db
     restart: always # Always try to restart if it fails
     environment:
-      # These variables set up the initial database credentials
+      # Set up initial database credentials
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: news_db
-    # START: ADD THIS HEALTHCHECK BLOCK
+    # Healthcheck Block
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d news_db"]
       interval: 5s
       timeout: 5s
       retries: 5
-    # END: ADD THIS HEALTHCHECK BLOCK
     ports:
-      # Optional: Maps the internal 5432 port to your local machine (for checking data)
+      # Maps the internal 5432 port to your local machine (for checking data)
       - "5432:5432"
     volumes:
-      # PERSISTENCE: Saves the database data to a local folder named 'pgdata'
-      - pgdata:/var/lib/postgresql/data
+      # (Persistence) Saves the database data to a local folder named 'postgresdata'
+      - postgresdata:/var/lib/postgresql/data
 
-  # 2. Your ETL Application Container
+  # 2. ETL Application Container
   etl_app:
-    # Build from your local Dockerfile (which now uses requirements.txt with psycopg2)
+    # Build from local Dockerfile (uses requirements.txt with psycopg2)
     build: .
     container_name: de_etl_processor
     # Ensure the ETL waits for Postgres to be ready
@@ -37,7 +36,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # The CRITICAL CONNECTION STRING (See explanation below)
+      # CRITICAL Connection String
       POSTGRES_URL: postgresql://user:password@postgres:5432/news_db
       NEWS_API_KEY: ${NEWS_API_KEY} # Reads the API key from your .env file
     # Ensure the script runs only once and exits
