@@ -28,6 +28,7 @@ with DAG(
     run_etl = DockerOperator(
         task_id='run_news_etl',
         image='news-etl-etl_app:latest',
+        force_pull=False,
         container_name='airflow_triggered_etl',
         api_version='auto',
         auto_remove=True,
