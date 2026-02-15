@@ -2,6 +2,7 @@
 data
 gemini.py
 .vscode
+logs/
 
 # Python-specific additions
 __pycache__/
