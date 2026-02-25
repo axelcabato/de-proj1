@@ -9,7 +9,7 @@ if not API_KEY:
     print("Error: NEWS_API_KEY environment variable not set.")
     exit(1)
 
-# Type checker hint: API_KEY is now guaranteed to be str
+# Type checker hint: API_KEY guaranteed to be str
 api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
 
 
@@ -39,7 +39,7 @@ def fetch_and_store_articles():
             
             with psycopg2.connect(POSTGRES_URL) as conn:
                 with conn.cursor() as cursor:
-                    # Create table if it doesn't exist
+                    # Create table if it doesn't exist (with new columns)
                     cursor.execute("""
                     CREATE TABLE IF NOT EXISTS articles (
                         id TEXT PRIMARY KEY,
@@ -47,9 +47,25 @@ def fetch_and_store_articles():
                         author TEXT,
                         body TEXT,
                         source TEXT,
-                        published_at TEXT
+                        published_at TEXT,
+                        sentiment_score REAL,
+                        word_count INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                     """)
+
+                    # Handle schema evolution: add columns if they don't exist
+                    # This allows the pipeline to work with databases created before these columns existed
+                    alter_statements = [
+                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS sentiment_score REAL",
+                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS word_count INTEGER",
+                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    ]
+
+                    for stmt in alter_statements:
+                        cursor.execute(stmt)
 
                     # Insert/update all articles
                     inserted_count = 0
