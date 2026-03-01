@@ -2,6 +2,7 @@ import os
 import psycopg2
 from newsdataapi import NewsDataApiClient
 from textblob import TextBlob
+from validators import validate_batch, ValidationResult
 
 # Read the API key from an environment variable
 API_KEY: str | None = os.environ.get("NEWS_API_KEY")
@@ -65,8 +66,43 @@ def fetch_and_store_articles():
             print("No articles found to store.")
             return
 
-        print(f"Successfully fetched {len(articles_to_store)} articles.")
+        print(f"Successfully fetched {len(articles_to_store)} articles from API.")
 
+        # TRANSFORM: Build article records with computed features
+        processed_articles = []
+        for item in articles_to_store:
+            creator = item.get("creator")
+            if isinstance(creator, list):
+                creator = ", ".join(creator)
+
+            body = item.get("content")
+
+            article = {
+                "id": item.get("article_id"),
+                "title": item.get("title"),
+                "author": creator,
+                "body": body,
+                "source": item.get("source_name"),
+                "published_at": item.get("pubDate"),
+                "sentiment_score": calculate_sentiment(body),
+                "word_count": calculate_word_count(body),
+            }
+            processed_articles.append(article)
+
+        # VALIDATE: Check data quality before insertion
+        valid_articles, invalid_results = validate_batch(processed_articles)
+
+        print(f"Validation complete: {len(valid_articles)} valid, {len(invalid_results)} invalid")
+
+        # Log invalid records (this is your audit trail)
+        for result in invalid_results:
+            print(f"REJECTED article {result.record_id}: {result.errors}")
+
+        if not valid_articles:
+            print("No valid articles to insert after validation.")
+            return
+
+        # LOAD: Insert only validated articles
         try:
             POSTGRES_URL = os.environ.get("POSTGRES_URL")
             if not POSTGRES_URL:
@@ -102,31 +138,9 @@ def fetch_and_store_articles():
                     for stmt in alter_statements:
                         cursor.execute(stmt)
 
-                    # Insert/update all articles
+                    # Insert only valid, pre-processed articles
                     inserted_count = 0
-                    for item in articles_to_store:
-                        creator = item.get("creator")
-                        if isinstance(creator, list):
-                            creator = ", ".join(creator)
-
-                        # Get the article body for text processing
-                        body = item.get("content")
-
-                        # Compute derived features
-                        sentiment = calculate_sentiment(body)
-                        word_count = calculate_word_count(body)
-
-                        article = {
-                            "id": item.get("article_id"),
-                            "title": item.get("title"),
-                            "author": creator,
-                            "body": body,
-                            "source": item.get("source_name"),
-                            "published_at": item.get("pubDate"),
-                            "sentiment_score": sentiment,
-                            "word_count": word_count,
-                        }
-
+                    for article in valid_articles:
                         cursor.execute("""
                         INSERT INTO articles (id, title, author, body, source, published_at, sentiment_score, word_count)
                         VALUES (%(id)s, %(title)s, %(author)s, %(body)s, %(source)s, %(published_at)s, %(sentiment_score)s, %(word_count)s)
