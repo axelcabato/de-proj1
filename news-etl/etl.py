@@ -126,6 +126,18 @@ def fetch_and_store_articles():
                     )
                     """)
 
+                    # Create logging table for pipeline observability
+                    cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS pipeline_logs (
+                        id SERIAL PRIMARY KEY,
+                        run_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        log_level TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        record_id TEXT,
+                        details JSONB
+                    )
+                    """)
+
                     # Handle schema evolution: add columns if they don't exist
                     # This allows the pipeline to work with databases created before these columns existed
                     alter_statements = [
@@ -154,7 +166,7 @@ def fetch_and_store_articles():
                             word_count = EXCLUDED.word_count,
                             updated_at = CURRENT_TIMESTAMP
                         """, article)
-                        inserted_count += 1
+                        inserted_count += 1 
 
                     # Explicitly commit the transaction to persist all inserts
                     conn.commit()
