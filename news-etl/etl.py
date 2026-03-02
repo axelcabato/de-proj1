@@ -3,6 +3,9 @@ import psycopg2
 from newsdataapi import NewsDataApiClient
 from textblob import TextBlob
 from validators import validate_batch, ValidationResult
+import json
+from datetime import datetime
+
 
 # Read the API key from an environment variable
 API_KEY: str | None = os.environ.get("NEWS_API_KEY")
@@ -13,6 +16,30 @@ if not API_KEY:
 
 # Type checker hint: API_KEY guaranteed to be str
 api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
+
+
+def log_to_db(cursor, level: str, message: str, record_id: str = None, details: dict = None):
+    """
+    Log a message to the pipeline_logs table.
+
+    Levels: INFO, WARNING, ERROR
+
+    Real-world note: Production systems typically use dedicated logging
+    infrastructure (CloudWatch, Datadog, ELK stack). This database logging
+    approach is simpler but demonstrates the same concepts:
+    - Structured logging (not just text)
+    - Severity levels
+    - Contextual information (record_id, details)
+    """
+    cursor.execute("""
+    INSERT INTO pipeline_logs (log_level, message, record_id, details)
+    VALUES (%s, %s, %s, %s)
+    """, (
+        level,
+        message,
+        record_id,
+        json.dumps(details) if details else None
+    ))
 
 
 def calculate_sentiment(text: str | None) -> float | None:
