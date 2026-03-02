@@ -19,35 +19,21 @@ This project implements a complete ETL (Extract, Transform, Load) pipeline with 
 ---
 
 ## Architecture
-
+```mermaid
+flowchart TB
+    subgraph Docker["Docker Compose Network"]
+        Scheduler["Airflow Scheduler"]
+        Webserver["Airflow Webserver<br/>(Port 8080)"]
+        Postgres["PostgreSQL Database<br/>(Port 5432)"]
+        ETL["ETL App Container"]
+        
+        Scheduler -->|"Triggers via DockerOperator"| ETL
+        ETL -->|"Writes transformed data"| Postgres
+    end
+    
+    API["NewsData.io API"]
+    ETL -->|"Fetches articles"| API
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│                       Docker Compose Network                      │
-├───────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐         │
-│  │   Airflow    │    │   Airflow    │    │  PostgreSQL  │         │
-│  │  Scheduler   │───▶│  Webserver   │    │   Database   │         │
-│  │              │    │  (Port 8080) │    │ (Port 5432)  │         │
-│  └──────┬───────┘    └──────────────┘    └──────▲───────┘         │
-│         │                                       │                 │
-│         │ Triggers via DockerOperator           │                 │
-│         ▼                                       │                 │
-│  ┌──────────────┐                               │                 │
-│  │   ETL App    │───────────────────────────────┘                 │
-│  │  Container   │       Writes transformed data                   │
-│  └──────────────┘                                                 │
-│         │                                                         │
-│         │ Fetches articles                                        │
-│         ▼                                                         │
-│  ┌──────────────┐                                                 │
-│  │ NewsData.io  │                                                 │
-│  │     API      │                                                 │
-│  └──────────────┘                                                 │
-│                                                                   │
-└───────────────────────────────────────────────────────────────────┘
-```
-
 ---
 
 ## Technical Stack
