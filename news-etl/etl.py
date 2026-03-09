@@ -1,10 +1,11 @@
 import os
+import json
+from datetime import datetime
+
 import psycopg2
 from newsdataapi import NewsDataApiClient
 from textblob import TextBlob
-from validators import validate_batch, ValidationResult
-import json
-from datetime import datetime
+from validators import validate_batch
 
 
 # Read the API key from an environment variable
@@ -14,26 +15,18 @@ if not API_KEY:
     print("Error: NEWS_API_KEY environment variable not set.")
     exit(1)
 
-# Type checker hint: API_KEY guaranteed to be str
 api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
 
 
-def log_to_db(cursor, level: str, message: str, record_id: str = None, details: dict = None):
+def log_to_db(cursor, level: str, message: str, record_id: str = None, details: dict = None) -> None:
     """
     Log a message to the pipeline_logs table.
-
+    
     Levels: INFO, WARNING, ERROR
-
-    Real-world note: Production systems typically use dedicated logging
-    infrastructure (CloudWatch, Datadog, ELK stack). This database logging
-    approach is simpler but demonstrates the same concepts:
-    - Structured logging (not just text)
-    - Severity levels
-    - Contextual information (record_id, details)
     """
     cursor.execute("""
-    INSERT INTO pipeline_logs (log_level, message, record_id, details)
-    VALUES (%s, %s, %s, %s)
+        INSERT INTO pipeline_logs (log_level, message, record_id, details)
+        VALUES (%s, %s, %s, %s)
     """, (
         level,
         message,
@@ -54,8 +47,6 @@ def calculate_sentiment(text: str | None) -> float | None:
 
     try:
         blob = TextBlob(text)
-        # .sentiment returns a namedtuple with polarity and subjectivity
-        # polarity: -1.0 (negative) to 1.0 (positive)
         return round(blob.sentiment.polarity, 4)
     except Exception as e:
         print(f"Sentiment analysis failed: {e}")
@@ -71,156 +62,201 @@ def calculate_word_count(text: str | None) -> int | None:
     if not text or not text.strip():
         return None
 
-    # Simple word count using split (handles multiple spaces)
     words = text.split()
     return len(words)
 
 
-def fetch_and_store_articles():
+def fetch_and_store_articles() -> None:
     """
     Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
+    
+    Pipeline stages:
+    1. EXTRACT: Fetch articles from NewsData.io API
+    2. TRANSFORM: Compute sentiment scores and word counts
+    3. VALIDATE: Check data quality before insertion
+    4. LOAD: Insert validated articles into PostgreSQL
     """
-    try:
-        response_data = api.news_api(language="en")
-
-    except Exception as e:
-        print(f"Failed to fetch data from API: {e}")
+    POSTGRES_URL = os.environ.get("POSTGRES_URL")
+    if not POSTGRES_URL:
+        print("Error: POSTGRES_URL not set")
         return
 
-    if response_data and response_data.get("status") == "success":
-        articles_to_store = response_data.get("results", [])
-        if not articles_to_store:
-            print("No articles found to store.")
-            return
+    try:
+        with psycopg2.connect(POSTGRES_URL) as conn:
+            with conn.cursor() as cursor:
+                # Initialize database schema
+                _initialize_schema(cursor)
 
-        print(f"Successfully fetched {len(articles_to_store)} articles from API.")
-
-        # TRANSFORM: Build article records with computed features
-        processed_articles = []
-        for item in articles_to_store:
-            creator = item.get("creator")
-            if isinstance(creator, list):
-                creator = ", ".join(creator)
-
-            body = item.get("content")
-
-            article = {
-                "id": item.get("article_id"),
-                "title": item.get("title"),
-                "author": creator,
-                "body": body,
-                "source": item.get("source_name"),
-                "published_at": item.get("pubDate"),
-                "sentiment_score": calculate_sentiment(body),
-                "word_count": calculate_word_count(body),
-            }
-            processed_articles.append(article)
-
-        # VALIDATE: Check data quality before insertion
-        valid_articles, invalid_results = validate_batch(processed_articles)
-
-        print(f"Validation complete: {len(valid_articles)} valid, {len(invalid_results)} invalid")
-
-        # Log invalid records (this is your audit trail)
-        for result in invalid_results:
-            print(f"REJECTED article {result.record_id}: {result.errors}")
-
-        if not valid_articles:
-            print("No valid articles to insert after validation.")
-            return
-
-        # LOAD: Insert only validated articles
-        try:
-            POSTGRES_URL = os.environ.get("POSTGRES_URL")
-            if not POSTGRES_URL:
-                raise ValueError("POSTGRES_URL not set")
-
-            with psycopg2.connect(POSTGRES_URL) as conn:
-                with conn.cursor() as cursor:
-                    # Create table if it doesn't exist (with new columns)
-                    cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS articles (
-                        id TEXT PRIMARY KEY,
-                        title TEXT,
-                        author TEXT,
-                        body TEXT,
-                        source TEXT,
-                        published_at TEXT,
-                        sentiment_score REAL,
-                        word_count INTEGER,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """)
-
-                    # Create logging table for pipeline observability
-                    cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS pipeline_logs (
-                        id SERIAL PRIMARY KEY,
-                        run_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        log_level TEXT NOT NULL,
-                        message TEXT NOT NULL,
-                        record_id TEXT,
-                        details JSONB
-                    )
-                    """)
-
-                    # Handle schema evolution: add columns if they don't exist
-                    # This allows the pipeline to work with databases created before these columns existed
-                    alter_statements = [
-                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS sentiment_score REAL",
-                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS word_count INTEGER",
-                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-                        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-                    ]
-
-                    for stmt in alter_statements:
-                        cursor.execute(stmt)
-
-                    # Insert only valid, pre-processed articles
-                    inserted_count = 0
-                    for article in valid_articles:
-                        cursor.execute("""
-                        INSERT INTO articles (id, title, author, body, source, published_at, sentiment_score, word_count)
-                        VALUES (%(id)s, %(title)s, %(author)s, %(body)s, %(source)s, %(published_at)s, %(sentiment_score)s, %(word_count)s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            title = EXCLUDED.title,
-                            author = EXCLUDED.author,
-                            body = EXCLUDED.body,
-                            source = EXCLUDED.source,
-                            published_at = EXCLUDED.published_at,
-                            sentiment_score = EXCLUDED.sentiment_score,
-                            word_count = EXCLUDED.word_count,
-                            updated_at = CURRENT_TIMESTAMP
-                        """, article)
-                        inserted_count += 1 
-
-                    # Explicitly commit the transaction to persist all inserts
-                    conn.commit()
-                    print(
-                        f"Successfully inserted/updated {inserted_count} articles into the database.")
-
-                # Verification happens in a separate cursor context after commit
-                # If verification fails, we know the data was saved
+                # EXTRACT: Fetch from API
                 try:
-                    with conn.cursor() as cursor:
-                        print("\n--- Verifying data by selecting records ---")
-                        cursor.execute(
-                            "SELECT id, title, source FROM articles LIMIT 5")
-                        rows = cursor.fetchall()
+                    response_data = api.news_api(language="en")
+                except Exception as e:
+                    log_to_db(cursor, "ERROR", f"API fetch failed: {str(e)}",
+                              details={"exception_type": type(e).__name__})
+                    conn.commit()
+                    print(f"Failed to fetch data from API: {e}")
+                    return
 
-                        for row in rows:
-                            print(row)
-                except psycopg2.Error as verify_error:
-                    print(
-                        f"Data was saved successfully, but verification query failed: {verify_error}")
+                if not (response_data and response_data.get("status") == "success"):
+                    log_to_db(cursor, "ERROR", "API request unsuccessful",
+                              details={"response": str(response_data)})
+                    conn.commit()
+                    print(f"API request was unsuccessful. Details: {response_data}")
+                    return
 
-        except psycopg2.Error as e:
-            print(f"Database error occurred: {e}")
+                articles_to_store = response_data.get("results", [])
+                if not articles_to_store:
+                    log_to_db(cursor, "INFO", "No articles returned from API")
+                    conn.commit()
+                    print("No articles found to store.")
+                    return
 
-    else:
-        print("API request was unsuccessful.")
-        print(f"Error details: {response_data}")
+                print(f"Successfully fetched {len(articles_to_store)} articles from API.")
+                log_to_db(cursor, "INFO", f"Fetched {len(articles_to_store)} articles from API")
+
+                # TRANSFORM: Build article records with computed features
+                processed_articles = _transform_articles(articles_to_store)
+
+                # VALIDATE: Check data quality before insertion
+                valid_articles, invalid_results = validate_batch(processed_articles)
+
+                print(f"Validation complete: {len(valid_articles)} valid, {len(invalid_results)} invalid")
+                log_to_db(cursor, "INFO",
+                          f"Validation: {len(valid_articles)} valid, {len(invalid_results)} invalid")
+
+                # Log invalid records
+                for result in invalid_results:
+                    print(f"REJECTED article {result.record_id}: {result.errors}")
+                    log_to_db(cursor, "WARNING", "Article failed validation",
+                              record_id=result.record_id,
+                              details={"errors": result.errors, "warnings": result.warnings})
+
+                if not valid_articles:
+                    log_to_db(cursor, "WARNING", "No valid articles to insert after validation")
+                    conn.commit()
+                    print("No valid articles to insert after validation.")
+                    return
+
+                # LOAD: Insert only validated articles
+                inserted_count = _load_articles(cursor, valid_articles)
+
+                # Log final summary
+                run_summary = {
+                    "articles_fetched": len(articles_to_store),
+                    "articles_valid": len(valid_articles),
+                    "articles_invalid": len(invalid_results),
+                    "articles_inserted": inserted_count,
+                    "run_timestamp": datetime.now().isoformat()
+                }
+                log_to_db(cursor, "INFO", "Pipeline run completed", details=run_summary)
+
+                conn.commit()
+                print(f"Successfully inserted/updated {inserted_count} articles into the database.")
+                print(f"Pipeline run summary: {run_summary}")
+
+                # Verification
+                _verify_data(cursor)
+
+    except psycopg2.Error as e:
+        print(f"Database error occurred: {e}")
+
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
+
+def _initialize_schema(cursor) -> None:
+    """Create tables and handle schema evolution."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS articles (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            author TEXT,
+            body TEXT,
+            source TEXT,
+            published_at TEXT,
+            sentiment_score REAL,
+            word_count INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pipeline_logs (
+            id SERIAL PRIMARY KEY,
+            run_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            log_level TEXT NOT NULL,
+            message TEXT NOT NULL,
+            record_id TEXT,
+            details JSONB
+        )
+    """)
+
+    # Schema evolution for existing databases
+    alter_statements = [
+        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS sentiment_score REAL",
+        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS word_count INTEGER",
+        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    ]
+    for stmt in alter_statements:
+        cursor.execute(stmt)
+
+
+def _transform_articles(articles_to_store: list) -> list[dict]:
+    """Transform raw API articles into processed records with computed features."""
+    processed_articles = []
+    for item in articles_to_store:
+        creator = item.get("creator")
+        if isinstance(creator, list):
+            creator = ", ".join(creator)
+
+        body = item.get("content")
+
+        article = {
+            "id": item.get("article_id"),
+            "title": item.get("title"),
+            "author": creator,
+            "body": body,
+            "source": item.get("source_name"),
+            "published_at": item.get("pubDate"),
+            "sentiment_score": calculate_sentiment(body),
+            "word_count": calculate_word_count(body),
+        }
+        processed_articles.append(article)
+
+    return processed_articles
+
+
+def _load_articles(cursor, valid_articles: list[dict]) -> int:
+    """Insert validated articles into the database. Returns count of inserted articles."""
+    inserted_count = 0
+    for article in valid_articles:
+        cursor.execute("""
+            INSERT INTO articles (id, title, author, body, source, published_at, sentiment_score, word_count)
+            VALUES (%(id)s, %(title)s, %(author)s, %(body)s, %(source)s, %(published_at)s, %(sentiment_score)s, %(word_count)s)
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                author = EXCLUDED.author,
+                body = EXCLUDED.body,
+                source = EXCLUDED.source,
+                published_at = EXCLUDED.published_at,
+                sentiment_score = EXCLUDED.sentiment_score,
+                word_count = EXCLUDED.word_count,
+                updated_at = CURRENT_TIMESTAMP
+        """, article)
+        inserted_count += 1
+
+    return inserted_count
+
+
+def _verify_data(cursor) -> None:
+    """Verify data was inserted by selecting sample records."""
+    cursor.execute("SELECT id, title, source FROM articles LIMIT 5")
+    rows = cursor.fetchall()
+    print("\n--- Verifying data by selecting records ---")
+    for row in rows:
+        print(row)
 
 
 if __name__ == "__main__":
