@@ -53,26 +53,13 @@ def calculate_sentiment(text: str | None) -> float | None:
         return None
 
 
-def calculate_word_count(text: str | None) -> int | None:
-    """
-    Calculate the number of words in the given text.
-
-    Returns word count as integer, or None if text is empty/None.
-    """
-    if not text or not text.strip():
-        return None
-
-    words = text.split()
-    return len(words)
-
-
 def fetch_and_store_articles() -> None:
     """
     Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
     
     Pipeline stages:
     1. EXTRACT: Fetch articles from NewsData.io API
-    2. TRANSFORM: Compute sentiment scores and word counts
+    2. TRANSFORM: Compute sentiment scores
     3. VALIDATE: Check data quality before insertion
     4. LOAD: Insert validated articles into PostgreSQL
     """
@@ -165,7 +152,10 @@ def fetch_and_store_articles() -> None:
 
 
 def _initialize_schema(cursor) -> None:
-    """Create tables and handle schema evolution."""
+    """
+    Create tables and handle schema evolution.
+    """
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS articles (
             id TEXT PRIMARY KEY,
@@ -175,7 +165,6 @@ def _initialize_schema(cursor) -> None:
             source TEXT,
             published_at TEXT,
             sentiment_score REAL,
-            word_count INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -195,7 +184,6 @@ def _initialize_schema(cursor) -> None:
     # Schema evolution for existing databases
     alter_statements = [
         "ALTER TABLE articles ADD COLUMN IF NOT EXISTS sentiment_score REAL",
-        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS word_count INTEGER",
         "ALTER TABLE articles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "ALTER TABLE articles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
     ]
@@ -204,24 +192,27 @@ def _initialize_schema(cursor) -> None:
 
 
 def _transform_articles(articles_to_store: list) -> list[dict]:
-    """Transform raw API articles into processed records with computed features."""
+    """
+    Transform raw API articles into processed records with computed features.
+    """
+
     processed_articles = []
     for item in articles_to_store:
         creator = item.get("creator")
         if isinstance(creator, list):
             creator = ", ".join(creator)
 
+        title = item.get("title")
         body = item.get("content")
 
         article = {
             "id": item.get("article_id"),
-            "title": item.get("title"),
+            "title": title,
             "author": creator,
             "body": body,
             "source": item.get("source_name"),
             "published_at": item.get("pubDate"),
-            "sentiment_score": calculate_sentiment(body),
-            "word_count": calculate_word_count(body),
+            "sentiment_score": calculate_sentiment(title),
         }
         processed_articles.append(article)
 
@@ -229,12 +220,15 @@ def _transform_articles(articles_to_store: list) -> list[dict]:
 
 
 def _load_articles(cursor, valid_articles: list[dict]) -> int:
-    """Insert validated articles into the database. Returns count of inserted articles."""
+    """
+    Insert validated articles into the database. Returns count of inserted articles.
+    """
+    
     inserted_count = 0
     for article in valid_articles:
         cursor.execute("""
-            INSERT INTO articles (id, title, author, body, source, published_at, sentiment_score, word_count)
-            VALUES (%(id)s, %(title)s, %(author)s, %(body)s, %(source)s, %(published_at)s, %(sentiment_score)s, %(word_count)s)
+            INSERT INTO articles (id, title, author, body, source, published_at, sentiment_score)
+            VALUES (%(id)s, %(title)s, %(author)s, %(body)s, %(source)s, %(published_at)s, %(sentiment_score)s)
             ON CONFLICT (id) DO UPDATE SET
                 title = EXCLUDED.title,
                 author = EXCLUDED.author,
@@ -242,7 +236,6 @@ def _load_articles(cursor, valid_articles: list[dict]) -> int:
                 source = EXCLUDED.source,
                 published_at = EXCLUDED.published_at,
                 sentiment_score = EXCLUDED.sentiment_score,
-                word_count = EXCLUDED.word_count,
                 updated_at = CURRENT_TIMESTAMP
         """, article)
         inserted_count += 1
@@ -251,7 +244,10 @@ def _load_articles(cursor, valid_articles: list[dict]) -> int:
 
 
 def _verify_data(cursor) -> None:
-    """Verify data was inserted by selecting sample records."""
+    """
+    Verify data was inserted by selecting sample records.
+    """
+
     cursor.execute("SELECT id, title, source FROM articles LIMIT 5")
     rows = cursor.fetchall()
     print("\n--- Verifying data by selecting records ---")

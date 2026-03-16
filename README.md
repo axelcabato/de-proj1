@@ -203,6 +203,19 @@ docker exec -it de_postgres_db psql -U user -d news_db -c "SELECT run_timestamp,
 
 **Software Engineering Standards**: Modular code organization, type hints, comprehensive documentation, and version control practices.
 
+## Known Limitations
+
+**Truncated Article Content**: The NewsData.io free tier does not provide full article body text. As a result:
+
+- Sentiment analysis is performed on article headlines rather than full content. Headline sentiment analysis is a legitimate approach used in financial news monitoring and media analysis.
+- Word count metrics reflect truncated content and are not representative of actual article length.
+
+The pipeline architecture fully supports complete content analysis when using a paid API tier that returns full article bodies.
+
+## License
+
+This project is licensed under the GNU General Public License v2.0. See the [LICENSE](https://github.com/axelcabato/de-proj1/blob/main/news-etl/LICENSE) file for details.
+
 ## About the Author
 
 I am building expertise in data engineering with a foundation in business administration and marketing. This project represents my commitment to developing rigorous technical skills and my approach to learning: methodical, well-documented, and focused on industry-relevant practices.

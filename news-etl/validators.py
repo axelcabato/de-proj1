@@ -19,6 +19,7 @@ class ValidationResult:
     - A record of what was checked
     - Structured data for logging/alerting
     """
+    
     is_valid: bool
     errors: list[str]
     warnings: list[str]
@@ -38,6 +39,7 @@ def validate_article(article: dict[str, Any]) -> ValidationResult:
     Returns ValidationResult with is_valid=False if critical rules fail,
     but may still have warnings for non-critical issues.
     """
+
     errors = []
     warnings = []
     record_id = article.get("id")
@@ -66,14 +68,6 @@ def validate_article(article: dict[str, Any]) -> ValidationResult:
         elif sentiment < -1.0 or sentiment > 1.0:
             errors.append(f"Sentiment score {sentiment} outside valid range [-1.0, 1.0]")
 
-    # VALIDATION: Word count must be non-negative
-    word_count = article.get("word_count")
-    if word_count is not None:
-        if not isinstance(word_count, int):
-            errors.append(f"Word count must be integer, got {type(word_count)}")
-        elif word_count < 0:
-            errors.append(f"Word count cannot be negative: {word_count}")
-
     return ValidationResult(
         is_valid=len(errors) == 0,
         errors=errors,
@@ -93,6 +87,7 @@ def validate_batch(articles: list[dict[str, Any]]) -> tuple[list[dict], list[Val
     This implementation uses a lenient approach, which is common when
     dealing with external APIs where you can't control data quality.
     """
+
     valid_articles = []
     invalid_results = []
 
