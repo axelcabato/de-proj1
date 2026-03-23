@@ -1,8 +1,7 @@
 .env
-.vscode
 logs/
 
-# Python-specific additions
+# Python
 __pycache__/
 *.pyc
 .venv
@@ -11,9 +10,13 @@ __pycache__/
 .mypy_cache/
 .ipynb_checkpoints/
 
-# Operating System and Editor Files
+# Operating System
 .DS_Store
 Thumbs.db
 
 # Log and temporary files
 *.log
+
+# IDE and Editor
+.vs/
+.vscode/
