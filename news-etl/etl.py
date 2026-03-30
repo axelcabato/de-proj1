@@ -51,104 +51,16 @@ def calculate_sentiment(text: str | None) -> float | None:
     except Exception as e:
         print(f"Sentiment analysis failed: {e}")
         return None
-
-
-def fetch_and_store_articles() -> None:
-    """
-    Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
     
-    Pipeline stages:
-    1. EXTRACT: Fetch articles from NewsData.io API
-    2. TRANSFORM: Compute sentiment scores
-    3. VALIDATE: Check data quality before insertion
-    4. LOAD: Insert validated articles into PostgreSQL
+
+def get_latest_article_date(cursor) -> str | None:
     """
-    POSTGRES_URL = os.environ.get("POSTGRES_URL")
-    if not POSTGRES_URL:
-        print("Error: POSTGRES_URL not set")
-        return
-
-    try:
-        with psycopg2.connect(POSTGRES_URL) as conn:
-            with conn.cursor() as cursor:
-                # Initialize database schema
-                _initialize_schema(cursor)
-
-                # EXTRACT: Fetch from API
-                try:
-                    response_data = api.news_api(language="en")
-                except Exception as e:
-                    log_to_db(cursor, "ERROR", f"API fetch failed: {str(e)}",
-                              details={"exception_type": type(e).__name__})
-                    conn.commit()
-                    print(f"Failed to fetch data from API: {e}")
-                    return
-
-                if not (response_data and response_data.get("status") == "success"):
-                    log_to_db(cursor, "ERROR", "API request unsuccessful",
-                              details={"response": str(response_data)})
-                    conn.commit()
-                    print(f"API request was unsuccessful. Details: {response_data}")
-                    return
-
-                articles_to_store = response_data.get("results", [])
-                if not articles_to_store:
-                    log_to_db(cursor, "INFO", "No articles returned from API")
-                    conn.commit()
-                    print("No articles found to store.")
-                    return
-
-                print(f"Successfully fetched {len(articles_to_store)} articles from API.")
-                log_to_db(cursor, "INFO", f"Fetched {len(articles_to_store)} articles from API")
-
-                # TRANSFORM: Build article records with computed features
-                processed_articles = _transform_articles(articles_to_store)
-
-                # VALIDATE: Check data quality before insertion
-                valid_articles, invalid_results = validate_batch(processed_articles)
-
-                print(f"Validation complete: {len(valid_articles)} valid, {len(invalid_results)} invalid")
-                log_to_db(cursor, "INFO",
-                          f"Validation: {len(valid_articles)} valid, {len(invalid_results)} invalid")
-
-                # Log invalid records
-                for result in invalid_results:
-                    print(f"REJECTED article {result.record_id}: {result.errors}")
-                    log_to_db(cursor, "WARNING", "Article failed validation",
-                              record_id=result.record_id,
-                              details={"errors": result.errors, "warnings": result.warnings})
-
-                if not valid_articles:
-                    log_to_db(cursor, "WARNING", "No valid articles to insert after validation")
-                    conn.commit()
-                    print("No valid articles to insert after validation.")
-                    return
-
-                # LOAD: Insert only validated articles
-                inserted_count = _load_articles(cursor, valid_articles)
-
-                # Log final summary
-                run_summary = {
-                    "articles_fetched": len(articles_to_store),
-                    "articles_valid": len(valid_articles),
-                    "articles_invalid": len(invalid_results),
-                    "articles_inserted": inserted_count,
-                    "run_timestamp": datetime.now().isoformat()
-                }
-                log_to_db(cursor, "INFO", "Pipeline run completed", details=run_summary)
-
-                conn.commit()
-                print(f"Successfully inserted/updated {inserted_count} articles into the database.")
-                print(f"Pipeline run summary: {run_summary}")
-
-                # Verification
-                _verify_data(cursor)
-
-    except psycopg2.Error as e:
-        print(f"Database error occurred: {e}")
-
-    except Exception as e:
-        print(f"Unexpected error: {e}")
+    Query the database for the most recent article's published date.
+    Returns the latest published_at value, or None if no articles exist.
+    """
+    cursor.execute("SELECT MAX(published_at) FROM articles")
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
 
 
 def _initialize_schema(cursor) -> None:
@@ -253,6 +165,127 @@ def _verify_data(cursor) -> None:
     print("\n--- Verifying data by selecting records ---")
     for row in rows:
         print(row)
+
+
+def fetch_and_store_articles() -> None:
+    """
+    Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
+    
+    Pipeline stages:
+    1. EXTRACT: Fetch articles from NewsData.io API
+    2. TRANSFORM: Compute sentiment scores
+    3. VALIDATE: Check data quality before insertion
+    4. LOAD: Insert validated articles into PostgreSQL
+    """
+    POSTGRES_URL = os.environ.get("POSTGRES_URL")
+    if not POSTGRES_URL:
+        print("Error: POSTGRES_URL not set")
+        return
+
+    try:
+        with psycopg2.connect(POSTGRES_URL) as conn:
+            with conn.cursor() as cursor:
+                # Initialize database schema
+                _initialize_schema(cursor)
+
+                # EXTRACT: Fetch from API (with incremental logic)
+                try:
+                    # Get the latest article date for incremental loading
+                    latest_date = get_latest_article_date(cursor)
+
+                    if latest_date:
+                        # Incremental load: only fetch articles newer than what we have
+                        from_date = latest_date[:10]  # Extract date portion
+                        log_to_db(cursor, "INFO", f"Incremental load from {from_date}")
+                        print(f"Performing incremental load from {from_date}")
+                        response_data = api.news_api(language="en", from_date=from_date)
+                    else:
+                        # Full load: no existing data
+                        log_to_db(cursor, "INFO", "Performing full load (no existing data)")
+                        print("Performing full load")
+                        response_data = api.news_api(language="en")
+                except Exception as e:
+                    log_to_db(cursor, "ERROR", f"API fetch failed: {str(e)}",
+                              details={"exception_type": type(e).__name__})
+                    conn.commit()
+                    print(f"Failed to fetch data from API: {e}")
+                    return
+
+                if not (response_data and response_data.get("status") == "success"):
+                    log_to_db(cursor, "ERROR", "API request unsuccessful",
+                              details={"response": str(response_data)})
+                    conn.commit()
+                    print(f"API request was unsuccessful. Details: {response_data}")
+                    return
+
+                articles_to_store = response_data.get("results", [])
+                if not articles_to_store:
+                    if latest_date:
+                        # This is expected for incremental loads when there's nothing new
+                        log_to_db(cursor, "INFO", "No new articles since last run")
+                        conn.commit()
+                        print("No new articles found since last run. Pipeline complete.")
+                        return
+                    else:
+                        # This is unexpected for a full load
+                        log_to_db(cursor, "WARNING", "No articles returned from API on full load")
+                        conn.commit()
+                        print("No articles found to store.")
+                        return
+
+                print(f"Successfully fetched {len(articles_to_store)} articles from API.")
+                log_to_db(cursor, "INFO", f"Fetched {len(articles_to_store)} articles from API")
+
+                # TRANSFORM: Build article records with computed features
+                processed_articles = _transform_articles(articles_to_store)
+
+                # VALIDATE: Check data quality before insertion
+                valid_articles, invalid_results = validate_batch(processed_articles)
+
+                print(f"Validation complete: {len(valid_articles)} valid, {len(invalid_results)} invalid")
+                log_to_db(cursor, "INFO",
+                          f"Validation: {len(valid_articles)} valid, {len(invalid_results)} invalid")
+
+                # Log invalid records
+                for result in invalid_results:
+                    print(f"REJECTED article {result.record_id}: {result.errors}")
+                    log_to_db(cursor, "WARNING", "Article failed validation",
+                              record_id=result.record_id,
+                              details={"errors": result.errors, "warnings": result.warnings})
+
+                if not valid_articles:
+                    log_to_db(cursor, "WARNING", "No valid articles to insert after validation")
+                    conn.commit()
+                    print("No valid articles to insert after validation.")
+                    return
+
+                # LOAD: Insert only validated articles
+                inserted_count = _load_articles(cursor, valid_articles)
+
+                # Log final summary
+                run_summary = {
+                    "load_type": "incremental" if latest_date else "full",
+                    "from_date": latest_date if latest_date else None,
+                    "articles_fetched": len(articles_to_store),
+                    "articles_valid": len(valid_articles),
+                    "articles_invalid": len(invalid_results),
+                    "articles_inserted": inserted_count,
+                    "run_timestamp": datetime.now().isoformat()
+                }
+                log_to_db(cursor, "INFO", "Pipeline run completed", details=run_summary)
+
+                conn.commit()
+                print(f"Successfully inserted/updated {inserted_count} articles into the database.")
+                print(f"Pipeline run summary: {run_summary}")
+
+                # Verification
+                _verify_data(cursor)
+
+    except psycopg2.Error as e:
+        print(f"Database error occurred: {e}")
+
+    except Exception as e:
+        print(f"Unexpected error: {e}")
 
 
 if __name__ == "__main__":
