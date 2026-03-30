@@ -18,7 +18,7 @@ with DAG(
     dag_id='news_etl_pipeline',
     default_args=default_args,
     description='Daily ETL pipeline that fetches news articles and stores them in PostgreSQL',
-    schedule_interval='@daily',
+    schedule_interval=None,
     start_date=datetime(2026, 2, 1),
     catchup=False,
     tags=['etl', 'news'],

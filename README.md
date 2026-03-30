@@ -4,7 +4,7 @@ A production-style data engineering pipeline that extracts news articles from an
 
 ## Project Status
 
-**Complete**
+**In progress**
 
 This is my first data engineering project, developed to gain hands-on experience with the tools and patterns used in professional data platform environments. The project follows industry-standard practices and demonstrates a methodical approach to building production-ready data pipelines.
 
