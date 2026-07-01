@@ -30,14 +30,13 @@ def get_connection():
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_articles():
     """Load articles from database with caching."""
-    
+
     query = """
         SELECT
             id,
             title,
             source,
             sentiment_score,
-            word_count,
             published_at,
             created_at
         FROM articles
@@ -83,7 +82,7 @@ def render_header():
 def render_metrics(df: pd.DataFrame):
     """Render key performance indicators."""
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         st.metric(
@@ -107,17 +106,10 @@ def render_metrics(df: pd.DataFrame):
             value=f"{unique_sources:,}"
         )
 
-    with col4:
-        avg_word_count = df['word_count'].mean()
-        st.metric(
-            label="Avg Word Count",
-            value=f"{avg_word_count:,.0f}"
-        )
-
 
 def render_articles_over_time(df: pd.DataFrame):
     """Visualization 1: Articles ingested over time."""
-    
+
     st.subheader("📈 Articles Over Time")
 
     # Filter out rows with invalid dates
@@ -129,7 +121,8 @@ def render_articles_over_time(df: pd.DataFrame):
 
     # Group by date
     df_valid['date'] = df_valid['published_at'].dt.date
-    daily_counts = df_valid.groupby('date').size().reset_index(name='article_count')
+    daily_counts = df_valid.groupby(
+        'date').size().reset_index(name='article_count')
     daily_counts['date'] = pd.to_datetime(daily_counts['date'])
 
     fig = px.area(
@@ -152,11 +145,14 @@ def render_articles_over_time(df: pd.DataFrame):
     # Add summary statistics
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.caption(f"**Date Range:** {daily_counts['date'].min().strftime('%Y-%m-%d')} to {daily_counts['date'].max().strftime('%Y-%m-%d')}")
+        st.caption(
+            f"**Date Range:** {daily_counts['date'].min().strftime('%Y-%m-%d')} to {daily_counts['date'].max().strftime('%Y-%m-%d')}")
     with col2:
-        st.caption(f"**Peak Day:** {daily_counts.loc[daily_counts['article_count'].idxmax(), 'date'].strftime('%Y-%m-%d')} ({daily_counts['article_count'].max()} articles)")
+        st.caption(
+            f"**Peak Day:** {daily_counts.loc[daily_counts['article_count'].idxmax(), 'date'].strftime('%Y-%m-%d')} ({daily_counts['article_count'].max()} articles)")
     with col3:
-        st.caption(f"**Daily Average:** {daily_counts['article_count'].mean():.1f} articles")
+        st.caption(
+            f"**Daily Average:** {daily_counts['article_count'].mean():.1f} articles")
 
 
 def render_sentiment_trends(df: pd.DataFrame):
@@ -183,12 +179,14 @@ def render_sentiment_trends(df: pd.DataFrame):
             else:
                 return 'Neutral'
 
-        df_sentiment['category'] = df_sentiment['sentiment_score'].apply(categorize_sentiment)
+        df_sentiment['category'] = df_sentiment['sentiment_score'].apply(
+            categorize_sentiment)
         category_counts = df_sentiment['category'].value_counts().reset_index()
         category_counts.columns = ['category', 'count']
 
         # Define colors
-        color_map = {'Positive': '#2ecc71', 'Neutral': '#95a5a6', 'Negative': '#e74c3c'}
+        color_map = {'Positive': '#2ecc71',
+                     'Neutral': '#95a5a6', 'Negative': '#e74c3c'}
 
         fig = px.pie(
             category_counts,
@@ -212,7 +210,8 @@ def render_sentiment_trends(df: pd.DataFrame):
             color_discrete_sequence=['#3498db']
         )
 
-        fig.add_vline(x=0, line_dash="dash", line_color="gray", annotation_text="Neutral")
+        fig.add_vline(x=0, line_dash="dash", line_color="gray",
+                      annotation_text="Neutral")
         fig.update_layout(
             xaxis_title="Sentiment Score (-1 to 1)",
             yaxis_title="Number of Articles"
@@ -257,7 +256,8 @@ def render_top_sources(df: pd.DataFrame):
     # Add source diversity metric
     total_sources = df['source'].nunique()
     top_3_share = source_counts.head(3)['article_count'].sum() / len(df) * 100
-    st.caption(f"**Source Diversity:** {total_sources} unique sources | Top 3 sources account for {top_3_share:.1f}% of articles")
+    st.caption(
+        f"**Source Diversity:** {total_sources} unique sources | Top 3 sources account for {top_3_share:.1f}% of articles")
 
 
 def render_pipeline_health(logs_df: pd.DataFrame):
@@ -266,7 +266,8 @@ def render_pipeline_health(logs_df: pd.DataFrame):
     st.subheader("🔧 Pipeline Health")
 
     if logs_df.empty:
-        st.info("No pipeline logs available yet. Trigger the ETL pipeline to see logs here.")
+        st.info(
+            "No pipeline logs available yet. Trigger the ETL pipeline to see logs here.")
         return
 
     col1, col2 = st.columns([2, 1])
@@ -276,7 +277,8 @@ def render_pipeline_health(logs_df: pd.DataFrame):
         level_counts = logs_df['log_level'].value_counts().reset_index()
         level_counts.columns = ['level', 'count']
 
-        color_map = {'INFO': '#2ecc71', 'WARNING': '#f39c12', 'ERROR': '#e74c3c'}
+        color_map = {'INFO': '#2ecc71',
+                     'WARNING': '#f39c12', 'ERROR': '#e74c3c'}
 
         fig = px.pie(
             level_counts,
@@ -291,7 +293,8 @@ def render_pipeline_health(logs_df: pd.DataFrame):
 
     with col2:
         # Recent errors/warnings
-        issues = logs_df[logs_df['log_level'].isin(['WARNING', 'ERROR'])].head(5)
+        issues = logs_df[logs_df['log_level'].isin(
+            ['WARNING', 'ERROR'])].head(5)
 
         if not issues.empty:
             st.markdown("**Recent Issues:**")
@@ -309,7 +312,7 @@ def render_pipeline_health(logs_df: pd.DataFrame):
 
 def render_sidebar(df: pd.DataFrame):
     """Render sidebar with filters and info."""
-    
+
     st.sidebar.header("Filters")
 
     # Date range filter
@@ -326,7 +329,8 @@ def render_sidebar(df: pd.DataFrame):
 
         if len(date_range) == 2:
             start_date, end_date = date_range
-            mask = (df['published_at'].dt.date >= start_date) & (df['published_at'].dt.date <= end_date)
+            mask = (df['published_at'].dt.date >= start_date) & (
+                df['published_at'].dt.date <= end_date)
             df = df[mask]
 
     # Source filter
@@ -363,7 +367,8 @@ def main():
         logs_df = load_pipeline_logs()
 
     if df.empty:
-        st.warning("No articles found in the database. Run the ETL pipeline to ingest data.")
+        st.warning(
+            "No articles found in the database. Run the ETL pipeline to ingest data.")
         st.stop()
 
     # Apply filters from sidebar
@@ -391,7 +396,8 @@ def main():
 
     # Footer
     st.divider()
-    st.caption(f"Dashboard last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    st.caption(
+        f"Dashboard last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 if __name__ == "__main__":

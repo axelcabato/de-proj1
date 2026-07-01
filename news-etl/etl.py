@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime
+from typing import Any
 
 import psycopg2
 from newsdataapi import NewsDataApiClient
@@ -18,10 +19,10 @@ if not API_KEY:
 api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
 
 
-def log_to_db(cursor, level: str, message: str, record_id: str = None, details: dict = None) -> None:
+def log_to_db(cursor, level: str, message: str, record_id: str | None = None, details: dict[str, Any] | None = None) -> None:
     """
     Log a message to the pipeline_logs table.
-    
+
     Levels: INFO, WARNING, ERROR
     """
     cursor.execute("""
@@ -51,7 +52,7 @@ def calculate_sentiment(text: str | None) -> float | None:
     except Exception as e:
         print(f"Sentiment analysis failed: {e}")
         return None
-    
+
 
 def get_latest_article_date(cursor) -> str | None:
     """
@@ -135,7 +136,7 @@ def _load_articles(cursor, valid_articles: list[dict]) -> int:
     """
     Insert validated articles into the database. Returns count of inserted articles.
     """
-    
+
     inserted_count = 0
     for article in valid_articles:
         cursor.execute("""
@@ -170,7 +171,7 @@ def _verify_data(cursor) -> None:
 def fetch_and_store_articles() -> None:
     """
     Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
-    
+
     Pipeline stages:
     1. EXTRACT: Fetch articles from NewsData.io API
     2. TRANSFORM: Compute sentiment scores
@@ -196,14 +197,17 @@ def fetch_and_store_articles() -> None:
                     if latest_date:
                         # Incremental load: only fetch articles newer than what we have
                         from_date = latest_date[:10]  # Extract date portion
-                        log_to_db(cursor, "INFO", f"Incremental load from {from_date}")
+                        log_to_db(cursor, "INFO",
+                                  f"Incremental load from {from_date}")
                         print(f"Performing incremental load from {from_date}")
-                        response_data = api.news_api(language="en", from_date=from_date)
+                        response_data = api.latest_api(
+                            language="en", from_date=from_date)
                     else:
                         # Full load: no existing data
-                        log_to_db(cursor, "INFO", "Performing full load (no existing data)")
+                        log_to_db(cursor, "INFO",
+                                  "Performing full load (no existing data)")
                         print("Performing full load")
-                        response_data = api.news_api(language="en")
+                        response_data = api.latest_api(language="en")
                 except Exception as e:
                     log_to_db(cursor, "ERROR", f"API fetch failed: {str(e)}",
                               details={"exception_type": type(e).__name__})
@@ -215,46 +219,56 @@ def fetch_and_store_articles() -> None:
                     log_to_db(cursor, "ERROR", "API request unsuccessful",
                               details={"response": str(response_data)})
                     conn.commit()
-                    print(f"API request was unsuccessful. Details: {response_data}")
+                    print(
+                        f"API request was unsuccessful. Details: {response_data}")
                     return
 
                 articles_to_store = response_data.get("results", [])
                 if not articles_to_store:
                     if latest_date:
                         # This is expected for incremental loads when there's nothing new
-                        log_to_db(cursor, "INFO", "No new articles since last run")
+                        log_to_db(cursor, "INFO",
+                                  "No new articles since last run")
                         conn.commit()
-                        print("No new articles found since last run. Pipeline complete.")
+                        print(
+                            "No new articles found since last run. Pipeline complete.")
                         return
                     else:
                         # This is unexpected for a full load
-                        log_to_db(cursor, "WARNING", "No articles returned from API on full load")
+                        log_to_db(cursor, "WARNING",
+                                  "No articles returned from API on full load")
                         conn.commit()
                         print("No articles found to store.")
                         return
 
-                print(f"Successfully fetched {len(articles_to_store)} articles from API.")
-                log_to_db(cursor, "INFO", f"Fetched {len(articles_to_store)} articles from API")
+                print(
+                    f"Successfully fetched {len(articles_to_store)} articles from API.")
+                log_to_db(cursor, "INFO",
+                          f"Fetched {len(articles_to_store)} articles from API")
 
                 # TRANSFORM: Build article records with computed features
                 processed_articles = _transform_articles(articles_to_store)
 
                 # VALIDATE: Check data quality before insertion
-                valid_articles, invalid_results = validate_batch(processed_articles)
+                valid_articles, invalid_results = validate_batch(
+                    processed_articles)
 
-                print(f"Validation complete: {len(valid_articles)} valid, {len(invalid_results)} invalid")
+                print(
+                    f"Validation complete: {len(valid_articles)} valid, {len(invalid_results)} invalid")
                 log_to_db(cursor, "INFO",
                           f"Validation: {len(valid_articles)} valid, {len(invalid_results)} invalid")
 
                 # Log invalid records
                 for result in invalid_results:
-                    print(f"REJECTED article {result.record_id}: {result.errors}")
+                    print(
+                        f"REJECTED article {result.record_id}: {result.errors}")
                     log_to_db(cursor, "WARNING", "Article failed validation",
                               record_id=result.record_id,
                               details={"errors": result.errors, "warnings": result.warnings})
 
                 if not valid_articles:
-                    log_to_db(cursor, "WARNING", "No valid articles to insert after validation")
+                    log_to_db(cursor, "WARNING",
+                              "No valid articles to insert after validation")
                     conn.commit()
                     print("No valid articles to insert after validation.")
                     return
@@ -272,10 +286,12 @@ def fetch_and_store_articles() -> None:
                     "articles_inserted": inserted_count,
                     "run_timestamp": datetime.now().isoformat()
                 }
-                log_to_db(cursor, "INFO", "Pipeline run completed", details=run_summary)
+                log_to_db(cursor, "INFO", "Pipeline run completed",
+                          details=run_summary)
 
                 conn.commit()
-                print(f"Successfully inserted/updated {inserted_count} articles into the database.")
+                print(
+                    f"Successfully inserted/updated {inserted_count} articles into the database.")
                 print(f"Pipeline run summary: {run_summary}")
 
                 # Verification
