@@ -28,7 +28,10 @@ class ValidationResult:
 
 def validate_article(article: dict[str, Any]) -> ValidationResult:
     """
-    Validate a single article record before database insertion.
+    Apply data quality rules to a single article before database insertion.
+    
+    Implements fail-fast validation: catches issues early in the pipeline
+    rather than allowing bad data to reach the database.
 
     Validation rules:
     1. Required fields must be present and non-empty
@@ -78,7 +81,10 @@ def validate_article(article: dict[str, Any]) -> ValidationResult:
 
 def validate_batch(articles: list[dict[str, Any]]) -> tuple[list[dict], list[ValidationResult]]:
     """
-    Validate a batch of articles, separating valid from invalid.
+    Separate valid articles from invalid ones for batch processing.
+    
+    Uses a lenient approach common with external APIs: valid records
+    proceed to insertion while invalid ones are logged for review.
 
     Returns:
         - List of valid articles (ready for insertion)

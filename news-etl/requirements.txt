@@ -2,3 +2,4 @@ newsdataapi
 psycopg2-binary
 textblob
 nltk
+pytest
