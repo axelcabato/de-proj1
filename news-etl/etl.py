@@ -21,7 +21,10 @@ api = NewsDataApiClient(apikey=API_KEY)  # type: ignore
 
 def log_to_db(cursor, level: str, message: str, record_id: str | None = None, details: dict[str, Any] | None = None) -> None:
     """
-    Log a message to the pipeline_logs table.
+    Write a structured log entry to the pipeline_logs table.
+    
+    Centralizes logging to enable pipeline monitoring and debugging
+    through SQL queries rather than parsing container logs.
 
     Levels: INFO, WARNING, ERROR
     """
@@ -38,10 +41,10 @@ def log_to_db(cursor, level: str, message: str, record_id: str | None = None, de
 
 def calculate_sentiment(text: str | None) -> float | None:
     """
-    Calculate sentiment polarity score for given text.
-
-    Returns a float between -1.0 (very negative) and 1.0 (very positive),
-    or None if text is empty/None.
+    Calculate sentiment polarity using TextBlob's lexicon-based analysis.
+    
+    Returns values between -1.0 (negative) and 1.0 (positive).
+    News headlines often return 0.0 due to neutral, factual language.
     """
     if not text or not text.strip():
         return None
@@ -56,8 +59,10 @@ def calculate_sentiment(text: str | None) -> float | None:
 
 def get_latest_article_date(cursor) -> str | None:
     """
-    Query the database for the most recent article's published date.
-    Returns the latest published_at value, or None if no articles exist.
+    Retrieve the most recent article's publication date from the database.
+    
+    Enables incremental loading by providing a cutoff date for API requests,
+    reducing duplicate fetches and API usage.
     """
     cursor.execute("SELECT MAX(published_at) FROM articles")
     row = cursor.fetchone()
@@ -170,7 +175,11 @@ def _verify_data(cursor) -> None:
 
 def fetch_and_store_articles() -> None:
     """
-    Fetches news articles from NewsData.io API and stores them in a PostgreSQL database.
+    Execute the complete ETL pipeline: extract from API, transform with
+    sentiment analysis, validate data quality, and load to PostgreSQL.
+    
+    Implements incremental loading when existing data is present,
+    falling back to full load for empty databases.
 
     Pipeline stages:
     1. EXTRACT: Fetch articles from NewsData.io API
