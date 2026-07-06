@@ -1,43 +1,45 @@
 # News ETL Pipeline with Apache Airflow
 
-A production-style data engineering pipeline that extracts news articles from an external API, transforms the data to handle inconsistencies, and loads it into a PostgreSQL database. The pipeline is orchestrated by Apache Airflow running in Docker containers, demonstrating industry-standard workflow automation practices.
+A production-ready data engineering pipeline that automatically collects news articles from the web, analyzes their sentiment, and presents insights through an interactive dashboard. Built with industry-standard tools including Apache Airflow, PostgreSQL, and Docker.
 
 ## Project Status
 
-**In progress**
-
-This is my first data engineering project, developed to gain hands-on experience with the tools and patterns used in professional data platform environments. The project follows industry-standard practices and demonstrates a methodical approach to building production-ready data pipelines.
+**Complete**
 
 | Phase | Status |
 |-------|--------|
-| ETL Pipeline Development | Complete |
-| Workflow Orchestration | Complete |
-| Containerization | Complete |
-| NLP Processing | Complete |
-| Data Validation | Complete |
-| Structured Logging | Complete |
-| Dashboard Visualization | Complete |
-| Incremental Loading | Complete |
+| ETL Pipeline Development | ✓ Complete |
+| Workflow Orchestration | ✓ Complete |
+| Containerization | ✓ Complete |
+| NLP Processing | ✓ Complete |
+| Data Validation | ✓ Complete |
+| Structured Logging | ✓ Complete |
+| Dashboard Visualization | ✓ Complete |
+| Incremental Loading | ✓ Complete |
+| Unit Testing | ✓ Complete |
 
 ## Project Overview
 
-This project implements a complete ETL (Extract, Transform, Load) pipeline that ingests news articles, enriches them with NLP-derived features, validates data quality, and presents insights through an interactive dashboard (future implementation). The project addresses questions such as:
+This project implements a complete ETL (Extract, Transform, Load) pipeline that ingests news articles, enriches them with NLP-derived features, validates data quality, and presents insights through an interactive dashboard. The project addresses questions such as:
 
 - How can automated pipelines reliably ingest data from external APIs?
 - What patterns ensure data quality and prevent duplicate records?
 - How do containerized architectures enable reproducible deployments?
 
-### Key Features
+## What This Project Does
 
-**Incremental Loading**: The pipeline tracks the latest article date and only fetches newer content, reducing API calls and improving efficiency.
+This pipeline automatically:
 
-**Sentiment Analysis**: Each article is enriched with sentiment scores and word counts using TextBlob, transforming raw text into structured analytical features.
+1. **Collects** news articles from NewsData.io API on a daily schedule
+2. **Analyzes** each headline's sentiment (positive, negative, or neutral)
+3. **Validates** data quality before storage
+4. **Stores** articles in a PostgreSQL database
+5. **Displays** insights through an interactive web dashboard
 
-**Data Validation**: A validation layer separates valid records from invalid ones, logging rejections with detailed error messages for audit trails.
-
-**Pipeline Observability**: All pipeline events are logged to a dedicated table with structured metadata, enabling monitoring and debugging.
+The system only fetches new articles each run (incremental loading), avoiding duplicates and reducing API usage.
 
 ## Architecture
+
 ```mermaid
 flowchart TB
     subgraph Docker["Docker Compose Network"]
