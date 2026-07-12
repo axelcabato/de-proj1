@@ -4,19 +4,7 @@ A production-ready data engineering pipeline that automatically collects news ar
 
 ## Project Status
 
-**Complete**
-
-| Phase | Status |
-|-------|--------|
-| ETL Pipeline Development | ✓ Complete |
-| Workflow Orchestration | ✓ Complete |
-| Containerization | ✓ Complete |
-| NLP Processing | ✓ Complete |
-| Data Validation | ✓ Complete |
-| Structured Logging | ✓ Complete |
-| Dashboard Visualization | ✓ Complete |
-| Incremental Loading | ✓ Complete |
-| Unit Testing | ✓ Complete |
+**Complete** — All phases implemented: ETL pipeline, workflow orchestration, containerization, NLP processing, data validation, structured logging, dashboard visualization, incremental loading, and unit testing.
 
 ## Project Overview
 
@@ -58,6 +46,161 @@ flowchart TB
     ETL -->|"Fetches articles"| API
 ```
 
+## Key Features
+
+### Incremental Loading
+The pipeline tracks the most recent article date and only fetches newer content on subsequent runs. This reduces API calls and prevents duplicate records.
+
+### Sentiment Analysis
+Each article headline is analyzed using TextBlob's natural language processing to determine sentiment polarity, scored from -1.0 (very negative) to +1.0 (very positive). News headlines typically score near 0.0 due to their neutral, factual writing style.
+
+### Data Validation
+A validation layer checks each article before database insertion:
+
+- Verifies required fields exist (article ID, title or body)
+- Confirms sentiment scores fall within valid range
+- Detects duplicate articles within batches
+- Logs rejected records with detailed error messages
+
+### Pipeline Observability
+All pipeline events are logged to a dedicated database table with structured metadata, enabling monitoring, debugging, and audit trails.
+
+### Interactive Dashboard
+A Streamlit dashboard provides real-time visualizations:
+
+- Article ingestion trends over time
+- Sentiment distribution analysis
+- Top news sources breakdown
+- Pipeline health monitoring
+
+## Technical Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| Orchestration | Apache Airflow 2.8.1 | DAG scheduling, task management, monitoring |
+| Database | PostgreSQL 14 | Article storage, Airflow metadata, pipeline logs |
+| Containerization | Docker & Docker Compose | Service isolation, reproducible deployments |
+| ETL Application | Python 3.13 | Data extraction, transformation, loading |
+| NLP Processing | TextBlob, NLTK | Sentiment analysis |
+| Data Validation | Custom validators | Data quality enforcement |
+| Visualization | Streamlit, Plotly | Interactive dashboard |
+| Testing | pytest | Unit tests for validation logic |
+
+## Repository Structure
+
+```
+news-etl-pipeline/
+├── dags/
+│   └── news_etl_dag.py          # Airflow DAG definition
+├── dashboard/
+│   ├── Dockerfile               # Dashboard container image
+│   ├── requirements.txt         # Dashboard dependencies
+│   └── app.py                   # Streamlit application
+├── tests/
+│   ├── __init__.py              # Package initializer
+│   └── test_validators.py       # Unit tests for validation
+├── .dockerignore                # Files excluded from Docker builds
+├── .env.example                 # Environment variable template
+├── .gitattributes               # Git attributes configuration
+├── .gitignore                   # Git ignore rules
+├── docker-compose.yml           # Multi-container orchestration
+├── Dockerfile                   # ETL application image
+├── Dockerfile.airflow           # Custom Airflow image with Docker CLI
+├── etl.py                       # Core ETL logic
+├── validators.py                # Data validation module
+├── init-db.sql                  # Database initialization
+├── requirements.txt             # ETL dependencies
+├── LICENSE                      # GPL v2.0 license
+└── README.md
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Docker Desktop installed and running
+- A NewsData.io API key ([free tier available](https://newsdata.io/))
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/news-etl-pipeline.git
+cd news-etl-pipeline
+```
+
+2. Create your environment file:
+```bash
+cp .env.example .env
+```
+
+3. Edit `.env` and add your API key:
+```
+NEWS_API_KEY=your_actual_api_key_here
+AIRFLOW_UID=50000
+```
+
+4. Build and start all services:
+```bash
+docker compose build etl_app
+docker compose up --build -d
+```
+
+5. Access the services:
+   - **Airflow UI**: http://localhost:8080 (credentials: admin/admin)
+   - **Dashboard**: http://localhost:8501
+
+6. Enable and trigger the `news_etl_pipeline` DAG from the Airflow interface
+
+### Running Tests
+
+```bash
+docker compose run --rm etl_app pytest tests/
+```
+
+## Usage
+
+### Manual Pipeline Trigger
+
+Navigate to the Airflow UI, select the `news_etl_pipeline` DAG, and click the play button to trigger an immediate run.
+
+### Scheduled Execution
+
+The pipeline runs daily at midnight UTC. Ensure the DAG toggle is enabled in the Airflow UI for scheduled execution.
+
+### Verify Data
+
+Connect to PostgreSQL to query ingested articles:
+```bash
+docker exec -it de_postgres_db psql -U user -d news_db -c "SELECT title, sentiment_score FROM articles LIMIT 5;"
+```
+
+### View Pipeline Logs
+```bash
+docker exec -it de_postgres_db psql -U user -d news_db -c "SELECT run_timestamp, log_level, message FROM pipeline_logs ORDER BY run_timestamp DESC LIMIT 10;"
+```
+
+### Check Incremental Loading
+```bash
+docker exec -it de_postgres_db psql -U user -d news_db -c "SELECT run_timestamp, details->>'load_type' as load_type, details->>'articles_fetched' as fetched FROM pipeline_logs WHERE message = 'Pipeline run completed' ORDER BY run_timestamp DESC LIMIT 5;"
+```
+
+### Container Management
+
+```bash
+# Start services
+docker compose up -d
+
+# Stop services (preserves data)
+docker compose down
+
+# Stop services and delete data
+docker compose down -v
+
+# View logs
+docker compose logs -f
+```
+
 ## Technical Approach
 
 ### Data Ingestion
@@ -72,26 +215,14 @@ Raw API responses undergo several transformations:
 |----------------|-------------|
 | Author Normalization | Converts list-type creator fields to comma-separated strings |
 | Sentiment Scoring | Calculates polarity scores (-1.0 to 1.0) using TextBlob |
-| Word Count | Computes article length for content analysis |
 | Schema Enforcement | Ensures consistent data types across all records |
-
-### Data Validation
-
-Before database insertion, each article passes through validation checks:
-
-- Primary key existence verification
-- Content presence validation (title or body required)
-- Sentiment score range verification (-1.0 to 1.0)
-- Word count non-negativity check
-- Batch duplicate detection
-
-Invalid records are logged with detailed error messages rather than failing the entire pipeline.
 
 ### Data Loading
 
-The pipeline uses PostgreSQL's `ON CONFLICT DO UPDATE` clause to implement idempotent upserts. This pattern ensures that re-running the pipeline with overlapping data updates existing records rather than creating duplicates.
+The pipeline uses PostgreSQL's `ON CONFLICT DO UPDATE` clause to implement idempotent upserts:
+
 ```sql
-INSERT INTO articles (id, title, author, body, source, published_at, sentiment_score, word_count)
+INSERT INTO articles (id, title, author, body, source, published_at, sentiment_score)
 VALUES (...)
 ON CONFLICT (id) DO UPDATE SET
     title = EXCLUDED.title,
@@ -99,124 +230,52 @@ ON CONFLICT (id) DO UPDATE SET
     updated_at = CURRENT_TIMESTAMP
 ```
 
-## Technical Stack
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Orchestration | Apache Airflow 2.8.1 | DAG scheduling, task management, monitoring |
-| Database | PostgreSQL 14 | Article storage, Airflow metadata, pipeline logs |
-| Containerization | Docker and Docker Compose | Service isolation, reproducible deployments |
-| ETL Application | Python 3.13 | Data extraction, transformation, loading |
-| NLP Processing | TextBlob, NLTK | Sentiment analysis, text processing |
-| Data Validation | Custom validators | Data quality enforcement |
-| Visualization (future implmentation) | Streamlit, Plotly | Interactive dashboard |
-
-## Repository Structure
-```
-news-etl/
-├── dags/
-│   └── news_etl_dag.py          # Airflow DAG definition
-├── dashboard/
-│   ├── Dockerfile               # Dashboard container image
-│   ├── requirements.txt         # Dashboard dependencies
-│   └── app.py                   # Streamlit application (in progress)
-├── logs/                        # Airflow execution logs
-├── plugins/                     # Airflow plugins (extensibility)
-├── docker-compose.yml           # Multi-container orchestration
-├── Dockerfile                   # ETL application image
-├── Dockerfile.airflow           # Custom Airflow image with Docker CLI
-├── etl.py                       # Core ETL logic
-├── validators.py                # Data validation module
-├── init-db.sql                  # Database initialization
-├── requirements.txt             # ETL dependencies
-└── README.md
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Docker Desktop installed and running
-- A NewsData.io API key (free tier available)
-
-### Installation
-
-1. Clone the repository:
-```bash
-   git clone https://github.com/yourusername/news-etl.git
-   cd news-etl
-```
-
-2. Create a `.env` file with your API key:
-```
-   NEWS_API_KEY=your_api_key_here
-   AIRFLOW_UID=50000
-```
-
-3. Build and start all services:
-```bash
-   docker compose up --build
-```
-
-4. Build the ETL application image:
-```bash
-   docker compose build etl_app
-```
-
-5. Access the services:
-   - Airflow UI: `http://localhost:8080` (credentials: admin/admin)
-   - Dashboard: `http://localhost:8501`
-
-6. Enable and trigger the `news_etl_pipeline` DAG from the Airflow interface
-
-## Usage
-
-### Manual Pipeline Trigger
-
-Navigate to the Airflow UI, select the `news_etl_pipeline` DAG, and click the play button to trigger an immediate run.
-
-### Scheduled Execution
-
-The pipeline in its final state will be configured to run daily at midnight UTC. Enable the DAG toggle to activate scheduled execution.
-
-### Verify Data
-
-Connect to PostgreSQL to query ingested articles:
-```bash
-docker exec -it de_postgres_db psql -U user -d news_db -c "SELECT title, sentiment_score, word_count FROM articles LIMIT 5;"
-```
-
-### View Pipeline Logs
-```bash
-docker exec -it de_postgres_db psql -U user -d news_db -c "SELECT run_timestamp, log_level, message FROM pipeline_logs ORDER BY run_timestamp DESC LIMIT 10;"
-```
+This pattern ensures that re-running the pipeline with overlapping data updates existing records rather than creating duplicates.
 
 ## What This Project Demonstrates
 
-**Data Engineering Fundamentals**: Complete ETL pipeline design with extraction from external APIs, transformation logic including NLP enrichment, and loading with idempotent upsert patterns.
+### For Data Engineering Professionals
 
-**Production Practices**: Implementation of incremental loading, data validation gates, structured logging, and error handling that mirrors real-world pipeline requirements.
+- **ETL Pipeline Design**: Complete extract-transform-load implementation with API integration, NLP enrichment, and database loading
+- **Incremental Loading**: Efficient data fetching using watermark-based logic to minimize API calls
+- **Data Quality**: Validation gates with structured error logging and graceful handling of invalid records
+- **Idempotent Operations**: Upsert patterns ensuring safe pipeline reruns
+- **Container Orchestration**: Multi-service Docker Compose with health checks and dependency management
+- **Workflow Automation**: Airflow DAG with DockerOperator for containerized task execution
 
-**Infrastructure as Code**: Multi-container Docker Compose orchestration with health checks, dependency management, and environment variable configuration.
+### For Software Engineers
 
-**Workflow Orchestration**: Apache Airflow DAG development with DockerOperator for containerized task execution, demonstrating separation between orchestration and execution layers.
+- **Modular Architecture**: Separation of concerns across ETL, validation, and presentation layers
+- **Type Hints**: Python type annotations for improved code clarity
+- **Unit Testing**: pytest-based tests for validation logic
+- **Documentation**: Comprehensive README and code docstrings
+- **Version Control**: Proper .gitignore, .env.example, and repository structure
 
-**Full-Stack Data Platform**: End-to-end architecture from data ingestion through storage to visualization, showing ability to own complete data products.
+### For Hiring Managers
 
-**Software Engineering Standards**: Modular code organization, type hints, comprehensive documentation, and version control practices.
+- **End-to-End Ownership**: Demonstrates ability to build complete data products from ingestion to visualization
+- **Production Practices**: Implements logging, error handling, and monitoring patterns used in real-world systems
+- **Industry Tools**: Hands-on experience with Airflow, Docker, PostgreSQL, and the Python data stack
+- **Learning Approach**: Methodical, well-documented development process
 
 ## Known Limitations
 
-**Truncated Article Content**: The NewsData.io free tier does not provide full article body text. As a result:
+### API Free Tier Constraints
 
-- Sentiment analysis is performed on article headlines rather than full content as it (Headline Sentiment Analysis) is a legitimate approach used in financial news monitoring and media analysis.
-- Word count metrics reflect truncated content and are not representative of actual article length.
+The NewsData.io free tier does not provide full article body text. As a result:
+
+- **Sentiment analysis is performed on headlines only**. This is a legitimate approach used in financial news monitoring and media analysis, though results differ from full-content analysis.
+- **Neutral scores are common**. TextBlob's lexicon-based analysis returns 0.0 for factual headlines lacking sentiment-laden words (e.g., "FIFA announces 2026 World Cup schedule"). This accurately reflects the neutral tone of professional news writing.
 
 The pipeline architecture fully supports complete content analysis when using a paid API tier that returns full article bodies.
 
+### Local Development
+
+This project runs on a single machine using Docker Compose. Production deployments would typically use Kubernetes, managed Airflow (e.g., Cloud Composer, MWAA), and cloud-hosted databases.
+
 ## License
 
-This project is licensed under the GNU General Public License v2.0. See the [LICENSE](https://github.com/axelcabato/de-proj1/blob/main/news-etl/LICENSE) file for details.
+This project is licensed under the GNU General Public License v2.0. See the [LICENSE](https://github.com/axelcabato/news-etl-pipeline/blob/main/LICENSE) file for details.
 
 ## About the Author
 
@@ -232,4 +291,4 @@ I welcome feedback from experienced data professionals and am eager to discuss t
 
 ---
 
-*This project is actively maintained. Last updated: July 2026*
+*Project completed July 2026*
